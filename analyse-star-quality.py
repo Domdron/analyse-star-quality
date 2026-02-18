@@ -3,9 +3,12 @@
 Analyse star quality metrics (HFR, elongation, SNR) in astrophotography raw images.
 
 Usage:
-    # Analyse images and create CSV
-    python3 analyse-star-quality.py analyse /path/to/directory
-    python3 analyse-star-quality.py analyse /path/to/directory --output results.csv
+    # Analyse images and create CSV (shell expands the glob)
+    python3 analyse-star-quality.py analyse /path/to/lights/*.orf
+    python3 analyse-star-quality.py analyse /path/to/lights/*.cr2 --output results.csv
+
+    # Analyse with a glob pattern (script expands it)
+    python3 analyse-star-quality.py analyse '/path/to/lights/*.orf'
 
     # Rename files based on existing CSV
     python3 analyse-star-quality.py rename /path/to/directory --by hfr
@@ -19,6 +22,7 @@ import os
 import sys
 import argparse
 import csv
+import glob
 import multiprocessing
 from functools import partial
 import rawpy
@@ -282,33 +286,41 @@ def _analyse_worker(args_tuple):
 
 def cmd_analyse(args):
     """Analyse all images and output CSV."""
-    source_dir = args.directory
+    # Expand globs (handles both shell-expanded paths and quoted glob patterns)
+    file_paths = []
+    for pattern in args.files:
+        expanded = glob.glob(pattern)
+        if expanded:
+            file_paths.extend(expanded)
+        elif os.path.isfile(pattern):
+            file_paths.append(pattern)
+        else:
+            print(f"Warning: no files matched '{pattern}'")
 
-    if not os.path.isdir(source_dir):
-        print(f"Error: {source_dir} is not a valid directory.")
+    if not file_paths:
+        print("Error: no input files found.")
         return 1
 
-    # Gather raw files
-    files = [f for f in os.listdir(source_dir) if f.lower().endswith('.orf')]
-    total_files = len(files)
+    # Deduplicate and sort
+    file_paths = sorted(set(os.path.abspath(p) for p in file_paths))
+    total_files = len(file_paths)
 
-    if total_files == 0:
-        print("No Olympus raw (.orf) files found in the directory.")
-        return 1
+    # Determine output directory (directory of first input file)
+    output_dir = os.path.dirname(file_paths[0])
 
     mode = "full resolution" if args.no_bin else "2x2 binned"
     num_jobs = args.jobs if not args.debug else 1  # Debug mode forces single-threaded
     if args.debug and args.jobs > 1:
         print("Note: --debug forces single-threaded mode")
 
-    print(f"Analysing {total_files} files in {source_dir} ({mode}, {num_jobs} workers)")
+    print(f"Analysing {total_files} files ({mode}, {num_jobs} workers)")
 
     results = []
     use_binning = not args.no_bin
 
     if num_jobs > 1:
         # Parallel processing
-        work_items = [(os.path.join(source_dir, f), f, use_binning) for f in files]
+        work_items = [(fp, os.path.basename(fp), use_binning) for fp in file_paths]
         with multiprocessing.Pool(num_jobs) as pool:
             for i, metrics in enumerate(pool.imap_unordered(_analyse_worker, work_items), 1):
                 if metrics['error']:
@@ -322,9 +334,9 @@ def cmd_analyse(args):
                 results.append(metrics)
     else:
         # Sequential processing (with optional debug)
-        for i, filename in enumerate(files, 1):
+        for i, file_path in enumerate(file_paths, 1):
+            filename = os.path.basename(file_path)
             print(f"[{i}/{total_files}] {filename}...", end=" ", flush=True)
-            file_path = os.path.join(source_dir, filename)
 
             try:
                 metrics = analyse_image(file_path, use_binning=use_binning, debug=args.debug)
@@ -354,7 +366,7 @@ def cmd_analyse(args):
     # Output CSV
     output_csv = args.output
     if output_csv is None:
-        output_csv = os.path.join(source_dir, "star_quality.csv")
+        output_csv = os.path.join(output_dir, "star_quality.csv")
 
     fieldnames = ['filename', 'hfr', 'elongation', 'snr', 'background', 'quality', 'stars_detected']
     with open(output_csv, 'w', newline='') as f:
@@ -463,17 +475,23 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Analyse images and create star_quality.csv
-  %(prog)s analyse /path/to/lights
+  # Analyse Olympus raw files
+  %(prog)s analyse /path/to/lights/*.orf
 
-  # Analyse using 8 parallel workers
-  %(prog)s analyse /path/to/lights -j 8
+  # Analyse Canon raw files with 8 parallel workers
+  %(prog)s analyse /path/to/lights/*.cr2 -j 8
+
+  # Analyse multiple formats at once
+  %(prog)s analyse /path/to/lights/*.orf /path/to/lights/*.nef
+
+  # Use a quoted glob (script expands it)
+  %(prog)s analyse '/path/to/lights/*.orf'
 
   # Analyse with higher precision (slower)
-  %(prog)s analyse /path/to/lights --no-bin
+  %(prog)s analyse /path/to/lights/*.orf --no-bin
 
   # Analyse with custom output file
-  %(prog)s analyse /path/to/lights --output results.csv
+  %(prog)s analyse /path/to/lights/*.orf --output results.csv
 
   # Rename files by HFR (using star_quality.csv)
   %(prog)s rename /path/to/lights --by hfr
@@ -496,8 +514,9 @@ Metrics:
 
     # Analyse subcommand
     analyse_parser = subparsers.add_parser('analyse', help='Analyse images and create CSV')
-    analyse_parser.add_argument("directory", help="Directory containing Olympus raw (.orf) images")
-    analyse_parser.add_argument("--output", "-o", help="Output CSV file path (default: star_quality.csv in source dir)")
+    analyse_parser.add_argument("files", nargs='+',
+                                help="Raw image files or glob patterns (e.g. *.orf *.cr2 *.nef)")
+    analyse_parser.add_argument("--output", "-o", help="Output CSV file path (default: star_quality.csv in input dir)")
     analyse_parser.add_argument("--no-bin", action="store_true",
                                 help="Skip 2x2 binning for higher precision (slower)")
     analyse_parser.add_argument("--debug", action="store_true",

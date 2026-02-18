@@ -20,7 +20,7 @@ Requires Python 3.8+.
 
 ```bash
 # Clone the repository
-git clone git@domdron-github.com:databu/analyse-star-quality.git
+git clone git@domdron-github.com:Domdron/analyse-star-quality.git
 cd analyse-star-quality
 
 # Create and activate a virtual environment
@@ -37,23 +37,29 @@ The tool has two subcommands: `analyse` and `rename`.
 
 ### Analyse images
 
-Scan a directory of raw images, measure star quality metrics, and write results to a CSV file.
+Pass raw image files (or glob patterns) to measure star quality metrics and write results to a CSV file. Supports any raw format readable by [rawpy/LibRaw](https://www.libraw.org/) (`.orf`, `.cr2`, `.cr3`, `.nef`, `.arw`, `.dng`, `.rw2`, `.raf`, etc.).
 
 ```bash
-# Analyse all .orf files in a directory (creates star_quality.csv)
-python3 analyse-star-quality.py analyse /path/to/lights
+# Analyse Olympus raw files (creates star_quality.csv in the input directory)
+python3 analyse-star-quality.py analyse /path/to/lights/*.orf
 
-# Use 8 parallel workers for faster processing
-python3 analyse-star-quality.py analyse /path/to/lights -j 8
+# Analyse Canon CR2 files with 8 parallel workers
+python3 analyse-star-quality.py analyse /path/to/lights/*.cr2 -j 8
+
+# Mix multiple formats
+python3 analyse-star-quality.py analyse /path/to/lights/*.orf /path/to/lights/*.nef
+
+# Quoted glob (the script expands it instead of the shell)
+python3 analyse-star-quality.py analyse '/path/to/lights/*.orf'
 
 # Higher precision analysis without 2x2 binning (slower)
-python3 analyse-star-quality.py analyse /path/to/lights --no-bin
+python3 analyse-star-quality.py analyse /path/to/lights/*.orf --no-bin
 
 # Write results to a custom CSV path
-python3 analyse-star-quality.py analyse /path/to/lights --output results.csv
+python3 analyse-star-quality.py analyse /path/to/lights/*.orf --output results.csv
 
 # Debug mode: show detailed star detection diagnostics (single-threaded)
-python3 analyse-star-quality.py analyse /path/to/lights --debug
+python3 analyse-star-quality.py analyse /path/to/lights/*.orf --debug
 ```
 
 ### Rename files by metric
@@ -75,7 +81,7 @@ Available metrics for `--by`: `hfr`, `elongation`, `snr`, `background`, `quality
 
 ## How it works
 
-1. **Raw decoding** -- Each `.orf` (Olympus raw) file is read with `rawpy` to access the raw Bayer sensor data.
+1. **Raw decoding** -- Each raw file is read with `rawpy` (a LibRaw wrapper) to access the raw Bayer sensor data. Any format supported by LibRaw works.
 2. **Binning** (optional) -- The Bayer data is 2x2 binned to produce a smaller monochrome image, which speeds up processing while preserving star shapes.
 3. **Background estimation** -- `sep` (Source Extractor as a Python library) estimates and subtracts the sky background.
 4. **Star detection** -- Sources are extracted above 5-sigma with a minimum area of 9 pixels. Filters remove hot pixels, saturated stars, edge detections, and faint sources.
@@ -85,7 +91,7 @@ Available metrics for `--by`: `hfr`, `elongation`, `snr`, `background`, `quality
 
 ## Supported formats
 
-Currently supports Olympus raw files (`.orf`). To add other raw formats, modify the file extension filter in `cmd_analyse()`.
+Supports any raw camera format readable by [LibRaw](https://www.libraw.org/), including: `.orf` (Olympus), `.cr2`/`.cr3` (Canon), `.nef` (Nikon), `.arw` (Sony), `.dng` (Adobe), `.rw2` (Panasonic), `.raf` (Fujifilm), `.pef` (Pentax), and more.
 
 ## License
 
